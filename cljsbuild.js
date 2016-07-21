@@ -45,7 +45,9 @@ function sh (command) {
 function removeFile (fileName) {
     try {
         fs.unlink(fileName);
-    } catch (e) {};
+    } catch (e) {
+        info('could not remove file', fileName, 'error:', e.stack);
+    };
 }
 
 function jsObjectToClj (object) {
@@ -85,11 +87,11 @@ class Config {
         this._cljsbuild = {};
 
         this._loadPackageJson();
-        this._checkCljsbuildData();
     }
 
     _getDefaults () {
         return {
+            fakeProjectFile: 'project.clj',
             tempdir: '.cljsbuild',
             target: 'out/main.js',
             src: 'src',
@@ -131,11 +133,6 @@ class Config {
         }
     }
 
-    _checkCljsbuildData () {
-        const defaults = this._getDefaults();
-
-    }
-
     getConfig (key) {
         const value = this._cljsbuild[key];
 
@@ -154,6 +151,11 @@ class Maven {
 
     constructor (config) {
         this._config = config;
+    }
+
+    _getPomXmlPath () {
+        // do not clutter the root directory
+        return path.resolve(path.join(this._config.getConfig('tempdir'), 'pom.xml'));
     }
 
     createPomXml () {
@@ -203,7 +205,7 @@ class Maven {
         buffer.push('</project>');
         buffer.push('');
 
-        const pomXmlPath = 'pom.xml';
+        const pomXmlPath = this._getPomXmlPath();
 
         info(`writing ${JSON.stringify(pomXmlPath)}`);
         fs.writeFileSync(pomXmlPath, buffer.join('\n'));
@@ -211,21 +213,17 @@ class Maven {
 
     installDependencies () {
         this.createPomXml();
-        sh('mvn install');
+        sh(`mvn install -f ${this._getPomXmlPath()}`);
     }
 
-    // TODO: cache classpath if deps are unchanged - as getting the cp takes sooooo long (it always tries to lookup SNAPSHOT deps online)
     getClasspath () {
+        // TODO: cache classpath if deps are unchanged - as getting the cp takes sooooo long (mvn always tries to lookup SNAPSHOT deps online)
+        const classPathfileName = path.resolve(path.join(this._config.getConfig('tempdir'), 'classpath'));
+
         this.createPomXml();
 
-        const classPathfileName = 'buildjs_cp.txt';
-
-        try {
-            sh(`mvn dependency:build-classpath -Dmdep.outputFile=${classPathfileName}`);
-            return fs.readFileSync(classPathfileName).toString();
-        } finally {
-            removeFile(classPathfileName);
-        }
+        sh(`mvn dependency:build-classpath -f=${this._getPomXmlPath()} -Dmdep.outputFile=${classPathfileName}`);
+        return fs.readFileSync(classPathfileName).toString();
     }
 }
 
@@ -245,6 +243,14 @@ class ClojureScript {
 
     _getBuildCljPath () {
         return path.join(this._config.getConfig('tempdir'), 'build.clj');
+    }
+
+    _getFakeProjectFilePath () {
+        return this._config.getConfig('fakeProjectFile');
+    }
+
+    _getNreplPortPath () {
+        return '.repl-port';
     }
 
     // user.clj file autoloaded by clojure, defines start-repl to initiate a
@@ -303,13 +309,13 @@ class ClojureScript {
                 `(require 'cljs.repl.browser)`,
                 ``,
                 `(cljs.repl/repl (cljs.repl.browser/repl-env)`,
-                `  :watch ${this._config.getConfig('src')}`,
+                `  :watch ${JSON.stringify(this._config.getConfig('src'))}`,
                 `  :output-dir ${JSON.stringify(path.dirname(this._config.getConfig('target')))}`,
                 `)`
             );
         }
 
-        // nrepl + cemerik/piggieback + middleware + .nrepl-port file + fake
+        // nrepl + cemerik/piggieback + middleware + .repl-port file + fake
         // project.clj to let emacs (and other IDEs) pick up the repl port automatically
         if (params.useNrepl) {
             buffer.push(
@@ -325,10 +331,10 @@ class ClojureScript {
                 `                      )`,
                 `           )`,
                 `     ]`,
-                `  ;;  nrepl-port file picked up by emacs-cider (and other IDEs?)`,
-                `  (spit ".repl-port" (:port conn))`,
+                `  ;;  repl-port file picked up by emacs-cider (and other IDEs?)`,
+                `  (spit ${JSON.stringify(this._getNreplPortPath())} (:port conn))`,
                 `  ;; fake project.clj file to make emacs-cider (and other IDEs?) recognize our clojurescript project root`,
-                `  (spit "project.clj" "")`,
+                `  (spit ${JSON.stringify(this._getFakeProjectFilePath())} "")`,
                 ``,
                 `  (print "nrepl server listening on port" (:port conn))`,
                 `)`
@@ -371,6 +377,14 @@ class ClojureScript {
     nrepl () {
         this.build();
         this._createBuildClj({useNrepl: true});
+
+        // cleanup tempfiles
+        process.on('SIGINT', () => process.exit());
+        process.on('exit', () => {
+            removeFile(this._getNreplPortPath());
+            removeFile(this._getFakeProjectFilePath());
+        });
+
         this._runBuildClj({});
     }
 }
