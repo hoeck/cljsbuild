@@ -2,7 +2,9 @@
   "name": "cljsbuild",
   "version": "0.0.1",
   "description": "A simple Clojurescript build tool written in Javascript",
-  "bin": "./",
+  "bin": {
+      "cljsbuild": "./cljsbuild.js"
+  },
   "author": "Erik Soehnel",
   "license": "MIT",
   "dependencies": {
