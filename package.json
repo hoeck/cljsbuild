@@ -1,6 +1,6 @@
 {
   "name": "cljsbuild",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A simple Clojurescript build tool written in Javascript",
   "bin": {
     "cljsbuild": "./cljsbuild.js"
