@@ -11,6 +11,7 @@ const process = require('process');
 const lodash = require('lodash');
 const mkdirp = require('mkdirp');
 const neodoc = require('neodoc');
+const request = require('request');
 
 /* logging */
 
@@ -75,8 +76,56 @@ function readCljsBuildPackageJson () {
     }
 }
 
-/* services */
+function httpGetJson (requestOptions) {
+    return new Promise((resolve, reject) => {
+        request.get(requestOptions, (err, response) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(JSON.parse(response.body));
+            }
+        });
+    });
+}
 
+function findLatestClojarsRelease (groupId, artifactId, releaseOnly) {
+    return httpGetJson({
+        url: 'https://clojars.org/search',
+        qs: {
+            q: `${groupId || ''} ${artifactId || ''}`,
+            format: 'json'
+        }
+    }).then((data) => {
+        const release = data.results.filter((item) => {
+            return item.group_name === groupId && item.jar_name === artifactId;
+        })[0];
+
+        return (release || {}).version;
+    });
+}
+
+function findLatestMavenRelease (groupId, artifactId, releaseOnly) {
+    return httpGetJson({
+        url: `http://search.maven.org/solrsearch/select`,
+        qs: {
+            q: `g:${JSON.stringify(groupId || '')} AND a:${JSON.stringify(artifactId || '')}`,
+            wt: 'json',
+            rows: 32,
+            core: 'gav'
+        }
+    }).then((data) => {
+        // don't pick alpha, beta, and RC versions
+        if (releaseOnly) {
+            const releaseRegex = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$/;
+
+            return (data.response.docs.filter(item => item.v.match(releaseRegex))[0] || {}).v;
+        }
+
+        return (data.response.docs[0] || {}).v;
+    });
+}
+
+/* services */
 
 /**
  * Access build options defined in ./package.json
@@ -84,9 +133,7 @@ function readCljsBuildPackageJson () {
 class Config {
 
     constructor () {
-        this._cljsbuild = {};
-
-        this._loadPackageJson();
+        this._cljsbuild = null;
     }
 
     _getDefaults () {
@@ -115,7 +162,15 @@ class Config {
             throw e;
         }
 
-        const data = JSON.parse(contents);
+        return JSON.parse(contents);
+    }
+
+    _loadConfig () {
+        if (this._cljsbuild) {
+            return;
+        }
+
+        const data = this._loadPackageJson();
 
         if (!data.hasOwnProperty('cljsbuild')) {
             warn('no "cljsbuild" key found in package.json');
@@ -133,7 +188,38 @@ class Config {
         }
     }
 
+    _updatePackageJson (address, value) {
+        const path = address.slice(0,-1);
+        const property = address.slice(-1)[0];
+
+        const packageJson = this._loadPackageJson();
+
+        let pointer = packageJson;
+
+        path.forEach((key) => {
+            if (pointer[key] === undefined) {
+                pointer[key] = {};
+            }
+
+            pointer = pointer[key];
+        });
+
+        pointer[property] = value;
+
+        fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2));
+
+        this._cljsbuild = null;
+        this._loadConfig();
+    }
+
+    /**
+     * Return a property from cljsbuild package.json entry.
+     *
+     * Print an errormessage and exit if the key does not exist.
+     */
     getConfig (key) {
+        this._loadConfig();
+
         const value = this._cljsbuild[key];
 
         if (value === undefined) {
@@ -141,6 +227,83 @@ class Config {
         }
 
         return value;
+    }
+
+    _fetchLatestVersion (name, releasesOnly) {
+        const groupId = name.split('/')[0];
+        const artifactId = name.split('/')[1] || groupId;
+
+        return findLatestMavenRelease(groupId, artifactId, releasesOnly).then((version) => {
+            if (version) {
+                return {name, version};
+            }
+
+            return findLatestClojarsRelease(groupId, artifactId).then((version) => {
+                if (version) {
+                    return {name, version};
+                }
+
+                log(`no version found for package ${JSON.stringify(name)}`);
+
+                return undefined;
+            });
+        });
+    };
+
+    /**
+     * Write an initial cljsbuild config into package.json.
+     *
+     * options:
+     *  - releasesOnly .. not use alpha, beta, rc versions
+     *  - cider .. add cider/nrepl && refactor-nrepl
+     */
+    initConfig (options) {
+        const data = this._loadPackageJson();
+
+        if (data.cljsbuild && data.cljsbuild.dependencies) {
+            logErrorAndExit('package.json cljsbuild.dependencies does already exist');
+        }
+
+        const defaultPackages = [];
+
+        // base clojurescript
+        defaultPackages.push(
+            'org.clojure/clojure',
+            'org.clojure/clojurescript'
+        );
+
+        // nrepl
+        defaultPackages.push(
+            'org.clojure/tools.nrepl',
+            'com.cemerick/piggieback',
+            'weasel'
+        );
+
+        // emacs cider
+        if (options.cider) {
+            defaultPackages.push(
+                'cider/cider-nrepl',
+                'refactor-nrepl'
+            );
+        }
+
+        // find the latest version for each package
+        return Promise.all(defaultPackages.map((name) => {
+            return this._fetchLatestVersion(name, options.releasesOnly);
+        })).then((depsWithVersions) => {
+            const dependencies = {};
+
+            depsWithVersions.forEach((d) => {
+                if (d) {
+                    dependencies[d.name] = d.version;
+                }
+            });
+
+            this._updatePackageJson(['cljsbuild'], {
+                main: '<add-your-namespace-here>/core',
+                dependencies
+            });
+        });
     }
 }
 
@@ -389,7 +552,7 @@ class ClojureScript {
     }
 }
 
-function runBuildCommand (args) {
+function runCommand (args) {
     const config = new Config();
     const maven = new Maven(config);
     const cljs = new ClojureScript({maven, config});
@@ -403,6 +566,14 @@ function runBuildCommand (args) {
     } else if (args.nrepl) {
         info('starting nrepl server');
         cljs.nrepl();
+    } else if (args.config) {
+        if (args.init) {
+            info('initializing package.json cljsbuild config');
+            config.initConfig({
+                releasesOnly: args.releasesOnly,
+                cider: args.cider
+            });
+        }
     } else {
         info('building');
         cljs.build();
@@ -417,14 +588,19 @@ usage:
     cljsbuild [options] install
     cljsbuild [options] repl
     cljsbuild [options] nrepl
+    cljsbuild [options] config init [config-init-options]
 
 options:
-    -h, --help        show help
-    -v, --verbose     verbose output
-    --version         show cljsbuilds version
+    -h, --help             show help
+    -v, --verbose          verbose output
+    --version              show cljsbuilds version
 
-build-options
-    -p, --production  build with optimizazion level :advanced
+build-options:
+    -p, --production       build with optimization level :advanced
+
+config-init-options:
+    -c, --cider            add emacs cider dependencies
+    -r, --releasesOnly     do not use alpha, beta or RC releases
 `;
 
 function main () {
@@ -448,7 +624,7 @@ function main () {
         logVerbosity = 1;
     }
 
-    runBuildCommand(args);
+    runCommand(args);
 }
 
 main();
