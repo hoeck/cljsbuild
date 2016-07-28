@@ -4,6 +4,7 @@
 
 const assert = require('assert');
 const childProcess = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const process = require('process');
@@ -40,6 +41,10 @@ function logErrorAndExit (...args) {
 
 function sh (command) {
     info(`running ${JSON.stringify(command)}`);
+
+    // TODO: configurable log output, log output with prefix, e.g. 'maven> '
+    //       But: that means I cannot use *Sync functions, must write
+    //       everything with Promises or generators.
     childProcess.execSync(command, {stdio: [0, 1, 2]});
 }
 
@@ -49,6 +54,19 @@ function removeFile (fileName) {
     } catch (e) {
         info('could not remove file', fileName, 'error:', e.stack);
     };
+}
+
+// read a string from fileName, return '' if fileName does not exist
+function readFile (fileName) {
+    try {
+        return fs.readFileSync(fileName).toString();
+    } catch (e) {
+        if (e.code !== 'ENOENT') {
+            throw e;
+        }
+
+        return '';
+    }
 }
 
 function jsObjectToClj (object) {
@@ -155,7 +173,7 @@ class Config {
         try {
             contents = fs.readFileSync('package.json');
         } catch (e) {
-            if (e.errno === 'ENOENT') {
+            if (e.code === 'ENOENT') {
                 logErrorAndExit('package.json does not exist');
             }
 
@@ -316,6 +334,37 @@ class Maven {
         this._config = config;
     }
 
+    // return a hash over the declared depdendencies of a project
+    _hashDepdendencies () {
+        // deterministically serialize the dependencies
+        const dependencies = this._config.getConfig('dependencies');
+        const dependencyList = [];
+
+        Object.keys(dependencies, (name) => {
+            dependencyList.push([name, dependencies[name]]);
+        });
+
+        dependencyList.sort((a,b) => {
+            const x = a[0];
+            const y = b[0];
+
+            if (x < y) {
+                return -1;
+            }
+            if (y > x) {
+                return 1;
+            }
+
+            return 0;
+        });
+
+        const dependencyString = dependencyList.map(d => `${d[0]}${d[1]}`).join('');
+
+        // hash them
+        return crypto.createHash('sha1').update(dependencyString).digest().toString('hex');;
+    }
+
+    // return the path of the generated pom.xml which drives maven
     _getPomXmlPath () {
         // do not clutter the root directory
         return path.resolve(path.join(this._config.getConfig('tempdir'), 'pom.xml'));
@@ -375,18 +424,43 @@ class Maven {
     }
 
     installDependencies () {
-        this.createPomXml();
-        sh(`mvn install -f ${this._getPomXmlPath()}`);
+        try {
+            this.createPomXml();
+            sh(`mvn install -f ${this._getPomXmlPath()}`);
+        } finally {
+            removeFile(this._getPomXmlPath());
+        }
     }
 
+    // compute, cache and return the projects classpath
+    // (installs depdendencies when missing)
     getClasspath () {
-        // TODO: cache classpath if deps are unchanged - as getting the cp takes sooooo long (mvn always tries to lookup SNAPSHOT deps online)
-        const classPathfileName = path.resolve(path.join(this._config.getConfig('tempdir'), 'classpath'));
+        const classpathValueFile = path.resolve(path.join(this._config.getConfig('tempdir'), 'classpath.value'));
+        const classpathHashFile = path.resolve(path.join(this._config.getConfig('tempdir'), 'classpath.hash'));
 
-        this.createPomXml();
+        const lastDependencyHash = readFile(classpathHashFile);
+        const currentDependencyHash = this._hashDepdendencies();
+        const cachedClasspath = readFile(classpathValueFile);
 
-        sh(`mvn dependency:build-classpath -f=${this._getPomXmlPath()} -Dmdep.outputFile=${classPathfileName}`);
-        return fs.readFileSync(classPathfileName).toString();
+        // use value from cache if not stale and the cache exists
+        if ((lastDependencyHash === currentDependencyHash) && cachedClasspath) {
+            info(`using cached classpath from ${classpathValueFile}`);
+
+            return cachedClasspath;
+        }
+
+        try {
+            // compute the classpath
+            this.createPomXml();
+            sh(`mvn dependency:build-classpath -f=${this._getPomXmlPath()} -Dmdep.outputFile=${classpathValueFile}`);
+
+            // cache the classpath
+            fs.writeFileSync(classpathHashFile, currentDependencyHash);
+
+            return fs.readFileSync(classpathValueFile).toString();
+        } finally {
+            removeFile(this._getPomXmlPath());
+        }
     }
 }
 
