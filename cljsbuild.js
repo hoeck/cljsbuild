@@ -268,11 +268,29 @@ class Config {
         });
     };
 
+    // find the latest version for each package in packages
+    // returns a promise resolving to a map of name -> version
+    _findPackageVersions (packages, releasesOnly) {
+        return Promise.all(packages.map((name) => {
+            return this._fetchLatestVersion(name, releasesOnly);
+        })).then((depsWithVersions) => {
+            const dependencies = {};
+
+            depsWithVersions.forEach((d) => {
+                if (d) {
+                    dependencies[d.name] = d.version;
+                }
+            });
+
+            return dependencies;
+        });
+    }
+
     /**
      * Write an initial cljsbuild config into package.json.
      *
      * options:
-     *  - releasesOnly .. not use alpha, beta, rc versions
+     *  - releasesOnly .. do not use alpha, beta, rc versions
      *  - cider .. add cider/nrepl && refactor-nrepl
      */
     initConfig (options) {
@@ -305,23 +323,56 @@ class Config {
             );
         }
 
-        // find the latest version for each package
-        return Promise.all(defaultPackages.map((name) => {
-            return this._fetchLatestVersion(name, options.releasesOnly);
-        })).then((depsWithVersions) => {
-            const dependencies = {};
-
-            depsWithVersions.forEach((d) => {
-                if (d) {
-                    dependencies[d.name] = d.version;
-                }
-            });
-
+        this._findPackageVersions(defaultPackages, options.releasesOnly).then((dependencies) => {
             this._updatePackageJson(['cljsbuild'], {
                 main: '<add-your-namespace-here>/core',
                 dependencies
             });
-        });
+        }).catch(logErrorAndExit);
+    }
+
+    /**
+     * Update the cljs dependencies to their newest versions
+     *
+     * Options:
+     *  - releasesOnly .. not use alpha, beta, rc versions
+     *  - write .. write the new versions to package.json
+     */
+    updateDependencies (options) {
+        const current = this.getConfig('dependencies');
+        const packageNames = Object.keys(current);
+
+        this._findPackageVersions(packageNames, options.releasesOnly).then((fetched) => {
+            const updated = {};
+
+            if (!options.write) {
+                log('would update the following dependencies, use --write to save them in package.json:');
+            } else {
+                log('updating package.json with new cljs versions:');
+            }
+
+            Object.keys(current).forEach((d) => {
+                const fetchedVersion = fetched[d.name];
+                const currentVersion = current[d.name];
+
+                if (fetchedVersion !== currentVersion) {
+                    updated[d.name] = fetchedVersion;
+
+                    log(`  ${d}: ${currentVersion} => ${fetchedVersion}`);
+                } else {
+                    updated[d.name] = currentVersion;
+                }
+            });
+
+            if (options.write) {
+                this._updatePackageJson(['cljsbuild'], {
+                    dependencies: updated
+                });
+            }
+
+            log('done');
+
+        }).catch(logErrorAndExit);
     }
 }
 
@@ -640,14 +691,19 @@ function runCommand (args) {
     } else if (args.nrepl) {
         info('starting nrepl server');
         cljs.nrepl();
-    } else if (args.config) {
-        if (args.init) {
-            info('initializing package.json cljsbuild config');
-            config.initConfig({
-                releasesOnly: args.releasesOnly,
-                cider: args.cider
-            });
-        }
+    } else if (args.init) {
+        info('initializing cljs dependencies in package.json');
+        config.initConfig({
+            releasesOnly: args.releasesOnly,
+            cider: args.cider
+        });
+    } else if (args.update) {
+        info('updating cljs dependencies configured in package.json');
+        config.updateConfig({
+            releasesOnly: args.releasesOnly,
+            cider: args.cider,
+            write: args.write
+        });
     } else {
         info('building');
         cljs.build();
@@ -659,10 +715,11 @@ Build, install dependencies and manage REPLs for a Clojurescript project.
 
 usage:
     cljsbuild [options] [build-options]
+    cljsbuild [options] init [dependency-options]
+    cljsbuild [options] update [dependency-options] [-w, --write]
     cljsbuild [options] install
     cljsbuild [options] repl
     cljsbuild [options] nrepl
-    cljsbuild [options] config init [config-init-options]
 
 options:
     -h, --help             show help
@@ -672,7 +729,7 @@ options:
 build-options:
     -p, --production       build with optimization level :advanced
 
-config-init-options:
+dependency-options:
     -c, --cider            add emacs cider dependencies
     -r, --releasesOnly     do not use alpha, beta or RC releases
 `;
