@@ -340,7 +340,7 @@ class Maven {
         const dependencies = this._config.getConfig('dependencies');
         const dependencyList = [];
 
-        Object.keys(dependencies, (name) => {
+        Object.keys(dependencies).forEach((name) => {
             dependencyList.push([name, dependencies[name]]);
         });
 
