@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const process = require('process');
 
+const asTable = require('as-table');
 const lodash = require('lodash');
 const mkdirp = require('mkdirp');
 const neodoc = require('neodoc');
@@ -106,7 +107,7 @@ function httpGetJson (requestOptions) {
     });
 }
 
-function findLatestClojarsRelease (groupId, artifactId, releaseOnly) {
+function findLatestClojarsRelease (groupId, artifactId, releasesOnly) {
     return httpGetJson({
         url: 'https://clojars.org/search',
         qs: {
@@ -114,15 +115,25 @@ function findLatestClojarsRelease (groupId, artifactId, releaseOnly) {
             format: 'json'
         }
     }).then((data) => {
-        const release = data.results.filter((item) => {
-            return item.group_name === groupId && item.jar_name === artifactId;
-        })[0];
+        const release = data.results
+                  .filter((item) => {
+                      if (releasesOnly) {
+                          const releaseRegex = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$/;
+
+                          return item.version.match(releaseRegex);
+                      }
+
+                      return true;
+                  })
+                  .filter((item) => {
+                      return item.group_name === groupId && item.jar_name === artifactId;
+                  })[0];
 
         return (release || {}).version;
     });
 }
 
-function findLatestMavenRelease (groupId, artifactId, releaseOnly) {
+function findLatestMavenRelease (groupId, artifactId, releasesOnly) {
     return httpGetJson({
         url: `http://search.maven.org/solrsearch/select`,
         qs: {
@@ -133,7 +144,7 @@ function findLatestMavenRelease (groupId, artifactId, releaseOnly) {
         }
     }).then((data) => {
         // don't pick alpha, beta, and RC versions
-        if (releaseOnly) {
+        if (releasesOnly) {
             const releaseRegex = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$/;
 
             return (data.response.docs.filter(item => item.v.match(releaseRegex))[0] || {}).v;
@@ -256,7 +267,7 @@ class Config {
                 return {name, version};
             }
 
-            return findLatestClojarsRelease(groupId, artifactId).then((version) => {
+            return findLatestClojarsRelease(groupId, artifactId, releasesOnly).then((version) => {
                 if (version) {
                     return {name, version};
                 }
@@ -292,6 +303,7 @@ class Config {
      * options:
      *  - releasesOnly .. do not use alpha, beta, rc versions
      *  - cider .. add cider/nrepl && refactor-nrepl
+     *  - dryRun .. only show what would have be written into package.json
      */
     initConfig (options) {
         const data = this._loadPackageJson();
@@ -324,10 +336,18 @@ class Config {
         }
 
         this._findPackageVersions(defaultPackages, options.releasesOnly).then((dependencies) => {
-            this._updatePackageJson(['cljsbuild'], {
+            const packageJsonCljsbuild = {
                 main: '<add-your-namespace-here>/core',
                 dependencies
-            });
+            };
+
+            if (options.dryRun) {
+                log('cljsbuild config data:', '\n'+JSON.stringify(packageJsonCljsbuild, null, 2));
+            } else {
+                log('writing cljsbuild section to package.json');
+                this._updatePackageJson(['cljsbuild'], packageJsonCljsbuild);
+                log('done');
+            }
         }).catch(logErrorAndExit);
     }
 
@@ -336,42 +356,53 @@ class Config {
      *
      * Options:
      *  - releasesOnly .. not use alpha, beta, rc versions
-     *  - write .. write the new versions to package.json
+     *  - dryRun .. do not write the new versions to package.json, just print it
      */
     updateDependencies (options) {
         const current = this.getConfig('dependencies');
         const packageNames = Object.keys(current);
 
         this._findPackageVersions(packageNames, options.releasesOnly).then((fetched) => {
-            const updated = {};
+            const updated = Object.assign(
+                {},
+                ...packageNames.filter((packageName) => {
+                    const fetchedVersion = fetched[packageName];
+                    const currentVersion = current[packageName];
+                    const isUpdated = fetchedVersion && fetchedVersion !== currentVersion;
 
-            if (!options.write) {
-                log('would update the following dependencies, use --write to save them in package.json:');
+                    return isUpdated;
+                }).map((packageName) => {
+                    return {[packageName]: fetched[packageName]};
+                })
+            );
+
+            if (!Object.keys(updated).length) {
+                log('no updates found');
+                return;
+            }
+
+            if (options.dryRun) {
+                log('would update the following dependencies in package.json:');
             } else {
                 log('updating package.json with new cljs versions:');
             }
 
-            Object.keys(current).forEach((d) => {
-                const fetchedVersion = fetched[d.name];
-                const currentVersion = current[d.name];
+            log(asTable(Object.keys(updated).map((packageName) => {
+                return [
+                    '',
+                    packageName,
+                    current[packageName],
+                    '=>',
+                    fetched[packageName]
+                ];
+            })));
 
-                if (fetchedVersion !== currentVersion) {
-                    updated[d.name] = fetchedVersion;
-
-                    log(`  ${d}: ${currentVersion} => ${fetchedVersion}`);
-                } else {
-                    updated[d.name] = currentVersion;
-                }
-            });
-
-            if (options.write) {
+            if (!options.dryRun) {
                 this._updatePackageJson(['cljsbuild'], {
-                    dependencies: updated
+                    dependencies: Object.assign({}, current, updated)
                 });
+                log('done');
             }
-
-            log('done');
-
         }).catch(logErrorAndExit);
     }
 }
@@ -609,7 +640,7 @@ class ClojureScript {
             buffer.push(
                 `(require '[clojure.tools.nrepl.server :as server])`,
                 `(require '[cemerick.piggieback :as pback])`,
-                `(require 'cider.nrepl)`,
+                `(require 'cider.nrepl)`, // TODO: add --cider option to nrepl task
                 ``,
                 `(let [conn (server/start-server`,
                 `             :handler (apply server/default-handler`,
@@ -694,15 +725,16 @@ function runCommand (args) {
     } else if (args.init) {
         info('initializing cljs dependencies in package.json');
         config.initConfig({
-            releasesOnly: args.releasesOnly,
-            cider: args.cider
+            releasesOnly: args['--releases-only'],
+            cider: args['--cider'],
+            dryRun: args['--dry-run']
         });
     } else if (args.update) {
         info('updating cljs dependencies configured in package.json');
-        config.updateConfig({
-            releasesOnly: args.releasesOnly,
-            cider: args.cider,
-            write: args.write
+        config.updateDependencies({
+            releasesOnly: args['--releases-only'],
+            cider: args['--cider'],
+            dryRun: args['--dry-run']
         });
     } else {
         info('building');
@@ -716,7 +748,7 @@ Build, install dependencies and manage REPLs for a Clojurescript project.
 usage:
     cljsbuild [options] [build-options]
     cljsbuild [options] init [dependency-options]
-    cljsbuild [options] update [dependency-options] [-w, --write]
+    cljsbuild [options] update [dependency-options]
     cljsbuild [options] install
     cljsbuild [options] repl
     cljsbuild [options] nrepl
@@ -731,7 +763,8 @@ build-options:
 
 dependency-options:
     -c, --cider            add emacs cider dependencies
-    -r, --releasesOnly     do not use alpha, beta or RC releases
+    -r, --releases-only    do not use alpha, beta or RC releases
+    -d, --dry-run          only show what would be written to package.json
 `;
 
 function main () {

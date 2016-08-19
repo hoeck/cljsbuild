@@ -12,6 +12,7 @@
     "url": "git://github.com/hoeck/cljsbuild.git"
   },
   "dependencies": {
+    "as-table": "^1.0.8",
     "lodash": "^4.13.1",
     "mkdirp": "^0.5.1",
     "neodoc": "^0.7.0",
