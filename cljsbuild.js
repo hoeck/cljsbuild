@@ -6,14 +6,17 @@ const assert = require('assert');
 const childProcess = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const path = require('path');
 const process = require('process');
+const querystring = require('querystring');
+const url = require('url');
 
 const asTable = require('as-table');
 const lodash = require('lodash');
 const mkdirp = require('mkdirp');
 const neodoc = require('neodoc');
-const request = require('request');
 
 /* logging */
 
@@ -96,13 +99,25 @@ function readCljsBuildPackageJson () {
 }
 
 function httpGetJson (requestOptions) {
+    const urlObject = url.parse(requestOptions.url);
+    const qs = querystring.encode(requestOptions.qs);
+    const client = urlObject.protocol === 'http:' ? http : https;
+
     return new Promise((resolve, reject) => {
-        request.get(requestOptions, (err, response) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve(JSON.parse(response.body));
-            }
+        client.get({
+            protocol: urlObject.protocol,
+            hostname: urlObject.hostname,
+            path: urlObject.pathname + (qs ? '?' : '') + qs
+        }, (response) => {
+            let body = '';
+
+            response.on('data', (data) => {
+                body += data;
+            });
+            response.on('end', () => {
+                resolve(JSON.parse(body));
+            });
+            response.on('error', reject);
         });
     });
 }
