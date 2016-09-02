@@ -622,7 +622,8 @@ class ClojureScript {
 
             const buildOpts = {
                 main: `'${this._config.getConfig('main')}`,
-                'output-to': `"${this._config.getConfig('target')}"`
+                'output-to': `"${this._config.getConfig('target')}"`,
+                'output-dir': `"${path.dirname(this._config.getConfig('target'))}"`
             };
 
             buffer.push(
@@ -665,7 +666,7 @@ class ClojureScript {
                 `                      )`,
                 `           )`,
                 `     ]`,
-                `  ;;  repl-port file picked up by emacs-cider (and other IDEs?)`,
+                `  ;; repl-port file picked up by emacs-cider (and other IDEs?)`,
                 `  (spit ${JSON.stringify(this._getNreplPortPath())} (:port conn))`,
                 `  ;; fake project.clj file to make emacs-cider (and other IDEs?) recognize our clojurescript project root`,
                 `  (spit ${JSON.stringify(this._getFakeProjectFilePath())} "")`,
