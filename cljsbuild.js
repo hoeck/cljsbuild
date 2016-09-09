@@ -185,6 +185,7 @@ class Config {
             fakeProjectFile: 'project.clj',
             tempdir: '.cljsbuild',
             target: 'out/main.js',
+            assetPath: '.',
             src: 'src',
             main: undefined,
             replPort: 9000,
@@ -623,7 +624,8 @@ class ClojureScript {
             const buildOpts = {
                 main: `'${this._config.getConfig('main')}`,
                 'output-to': `"${this._config.getConfig('target')}"`,
-                'output-dir': `"${path.dirname(this._config.getConfig('target'))}"`
+                'output-dir': `"${path.dirname(this._config.getConfig('target'))}"`,
+                'asset-path': `"${this._config.getConfig('assetPath')}"`
             };
 
             buffer.push(
