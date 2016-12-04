@@ -207,7 +207,11 @@ class Config {
             throw e;
         }
 
-        return JSON.parse(contents);
+        try {
+            return JSON.parse(contents);
+        } catch (e) {
+            logErrorAndExit(`cannot parse package.json: ${e.message}`);
+        }
     }
 
     _loadConfig () {
