@@ -6,7 +6,8 @@
     "cljsbuild": "./cljsbuild.js"
   },
   "scripts": {
-    "test": "docker run --tty --rm --volume $PWD:/cljsbuild --workdir /cljsbuild --tmpfs /test:exec node:6-slim node /cljsbuild/test/test.js"
+    "test": "docker run --tty --rm --volume $PWD:/cljsbuild --workdir /cljsbuild --tmpfs /test:exec node:6-slim node /cljsbuild/test/test.js",
+    "test-watch": "supervisor --timestamp --no-restart-on exit --exec npm run test"
   },
   "author": "Erik Soehnel",
   "license": "MIT",
@@ -21,10 +22,11 @@
     "neodoc": "0.7.0"
   },
   "devDependencies": {
-    "co": "^4.6.0",
+    "co": "4.6.0",
     "jasmine": "2.5.2",
     "jasmine-co": "1.2.1",
     "jasmine-spec-reporter": "2.7.0",
-    "mock-script-environment": "0.0.2"
+    "mock-script-environment": "0.0.2",
+    "supervisor": "^0.12.0"
   }
 }
