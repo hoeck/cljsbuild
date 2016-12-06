@@ -96,5 +96,11 @@ describe('the build command', () => {
                 ]
             });
         });
+
+        it('should build with :advanced when the -p flag is given', function * () {
+            yield cljsbuild('-p');
+
+            expect(scriptEnv.readFiles()['.cljsbuild/build.clj']).toMatch(/:advanced/);
+        });
     });
 });

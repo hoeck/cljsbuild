@@ -629,7 +629,8 @@ class ClojureScript {
                 main: `'${this._config.getConfig('main')}`,
                 'output-to': `"${this._config.getConfig('target')}"`,
                 'output-dir': `"${path.dirname(this._config.getConfig('target'))}"`,
-                'asset-path': `"${this._config.getConfig('assetPath')}"`
+                'asset-path': `"${this._config.getConfig('assetPath')}"`,
+                optimizations: params.production ? ':advanced' : ':none'
             };
 
             buffer.push(
@@ -699,8 +700,8 @@ class ClojureScript {
         sh(`${rlwrap}java -cp ${classpath} clojure.main ${buildClj}`);
     }
 
-    build () {
-        this._createBuildClj({buildMethod: 'build'});
+    build ({production}) {
+        this._createBuildClj({buildMethod: 'build', production});
         this._runBuildClj();
     }
 
@@ -760,7 +761,9 @@ function runCommand (args) {
         });
     } else {
         info('building');
-        cljs.build();
+        cljs.build({
+            production: args['--production']
+        });
     }
 }
 
