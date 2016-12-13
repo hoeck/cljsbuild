@@ -19,14 +19,16 @@
     "as-table": "1.0.8",
     "lodash": "4.13.1",
     "mkdirp": "0.5.1",
-    "neodoc": "0.7.0"
+    "neodoc": "0.7.0",
+    "simple-get": "2.3.0"
   },
   "devDependencies": {
     "co": "4.6.0",
+    "connect": "3.5.0",
     "jasmine": "2.5.2",
     "jasmine-co": "1.2.1",
     "jasmine-spec-reporter": "2.7.0",
-    "mock-script-environment": "0.0.2",
+    "mock-script-environment": "0.1.0",
     "supervisor": "^0.12.0"
   }
 }

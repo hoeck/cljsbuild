@@ -1,6 +1,9 @@
 const assert = require('assert');
+const http = require('http');
+const url = require('url');
 const process = require('process');
 
+const connect = require('connect');
 const Jasmine = require('jasmine');
 const jasmineCo = require('jasmine-co');
 const SpecReporter = require('jasmine-spec-reporter');
@@ -10,10 +13,87 @@ const scriptEnv = new MockScriptEnvironment();
 
 module.exports = {
     scriptEnv,
-    cljsbuild (...args) {
-        return scriptEnv.exec(`/cljsbuild/cljsbuild.js ${args.join(' ')}`);
-    }
+    cljsbuild,
+    httpServer,
+    mockMavenAndClojars
 };
+
+function httpServer ({port = 80} = {}) {
+    const app = connect();
+
+    return new Promise((resolve) => {
+        const server = http.createServer(app).listen(port, () => {
+            resolve({
+                use: app.use.bind(app),
+                close () {
+                    return new Promise((resolve) => {
+                        server.close(resolve);
+                    });
+                }
+            });
+        });
+    });
+}
+
+/**
+ * Set up a mock maven and clojars http repo server.
+ */
+function * mockMavenAndClojars ({mavenCallback, clojarsCallback}) {
+    // mock external repositories
+    scriptEnv.mockHost('search.maven.org');
+    scriptEnv.mockHost('clojars.org');
+
+    const server = yield httpServer();
+
+    server.use((req, res) => {
+        const parsedUrl = url.parse(req.url, true);
+
+        if (req.headers.host === 'search.maven.org' && parsedUrl.pathname === '/solrsearch/select') {
+            // an array like [{v: '1.0.0'}, {v: '0.9.3'}]
+            const versions = mavenCallback(parsedUrl.query.q);
+
+            if (!versions) {
+                res.writeHead(500, 'server error');
+                res.end();
+                return;
+            }
+
+            res.end(JSON.stringify({
+                response: {
+                    docs: versions
+                }
+            }));
+
+            return;
+        }
+
+        if (req.headers.host === 'clojars.org' && parsedUrl.pathname === '/search') {
+            // an array of items: {version: '1.0.1', group_name: '<groupId>', jar_name: '<artifactId>'}
+            const versions = clojarsCallback(parsedUrl.query.q);
+
+            if (!versions) {
+                res.writeHead(500, 'server error');
+                res.end();
+                return;
+            }
+
+            res.end(JSON.stringify({
+                results: versions
+            }));
+
+            return;
+        }
+
+        res.writeHead(404, 'not found');
+        res.end();
+    });
+
+    return server;
+}
+
+function cljsbuild (...args) {
+    return scriptEnv.exec(`/cljsbuild/cljsbuild.js ${args.join(' ')}`);
+}
 
 function runTests () {
     const jasmineRunner = new Jasmine(); // installs the jasmine globals

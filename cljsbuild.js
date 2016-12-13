@@ -6,8 +6,6 @@ const assert = require('assert');
 const childProcess = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
-const http = require('http');
-const https = require('https');
 const path = require('path');
 const process = require('process');
 const querystring = require('querystring');
@@ -17,6 +15,7 @@ const asTable = require('as-table');
 const lodash = require('lodash');
 const mkdirp = require('mkdirp');
 const neodoc = require('neodoc');
+const simpleGet = require('simple-get');
 
 /* logging */
 
@@ -98,74 +97,67 @@ function readCljsBuildPackageJson () {
     }
 }
 
-function httpGetJson (requestOptions) {
-    const urlObject = url.parse(requestOptions.url);
-    const qs = querystring.encode(requestOptions.qs);
-    const client = urlObject.protocol === 'http:' ? http : https;
-
+function findLatestClojarsRelease (groupId, artifactId, releasesOnly) {
     return new Promise((resolve, reject) => {
-        client.get({
-            protocol: urlObject.protocol,
-            hostname: urlObject.hostname,
-            path: urlObject.pathname + (qs ? '?' : '') + qs
-        }, (response) => {
-            let body = '';
+        const qs = querystring.encode({
+            q: `${groupId || ''} ${artifactId || ''}`,
+            format: 'json'
+        });
+        const url = `http://clojars.org/search?${qs}`;
 
-            response.on('data', (data) => {
-                body += data;
-            });
-            response.on('end', () => {
-                resolve(JSON.parse(body));
-            });
-            response.on('error', reject);
+        simpleGet.concat(url, (err, res, data) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+
+            const release = JSON.parse(data)
+                      .results
+                      .filter((item) => {
+                          if (releasesOnly) {
+                              const releaseRegex = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$/;
+
+                              return item.version.match(releaseRegex);
+                          }
+
+                          return true;
+                      })
+                      .filter((item) => {
+                          return item.group_name === groupId && item.jar_name === artifactId;
+                      })[0];
+
+            resolve((release || {}).version);
         });
     });
 }
 
-function findLatestClojarsRelease (groupId, artifactId, releasesOnly) {
-    return httpGetJson({
-        url: 'https://clojars.org/search',
-        qs: {
-            q: `${groupId || ''} ${artifactId || ''}`,
-            format: 'json'
-        }
-    }).then((data) => {
-        const release = data.results
-                  .filter((item) => {
-                      if (releasesOnly) {
-                          const releaseRegex = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$/;
-
-                          return item.version.match(releaseRegex);
-                      }
-
-                      return true;
-                  })
-                  .filter((item) => {
-                      return item.group_name === groupId && item.jar_name === artifactId;
-                  })[0];
-
-        return (release || {}).version;
-    });
-}
-
 function findLatestMavenRelease (groupId, artifactId, releasesOnly) {
-    return httpGetJson({
-        url: `http://search.maven.org/solrsearch/select`,
-        qs: {
+    return new Promise((resolve, reject) => {
+        const qs = querystring.encode({
             q: `g:${JSON.stringify(groupId || '')} AND a:${JSON.stringify(artifactId || '')}`,
             wt: 'json',
             rows: 32,
             core: 'gav'
-        }
-    }).then((data) => {
-        // don't pick alpha, beta, and RC versions
-        if (releasesOnly) {
-            const releaseRegex = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$/;
+        });
+        const url = `http://search.maven.org/solrsearch/select?${qs}`;
 
-            return (data.response.docs.filter(item => item.v.match(releaseRegex))[0] || {}).v;
-        }
+        simpleGet.concat(url, (err, res, rawData) => {
+            if (err) {
+                reject(err);
+                return;
+            }
 
-        return (data.response.docs[0] || {}).v;
+            const data = JSON.parse(rawData);
+
+            // don't pick alpha, beta, and RC versions
+            if (releasesOnly) {
+                const releaseRegex = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$/;
+
+                resolve((data.response.docs.filter(item => item.v.match(releaseRegex))[0] || {}).v);
+            } else {
+                resolve((data.response.docs[0] || {}).v);
+            }
+        });
     });
 }
 
