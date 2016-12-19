@@ -1,5 +1,3 @@
-const fs = require('fs');
-
 const {scriptEnv, cljsbuild} = require('./test');
 
 describe('the build command', () => {
@@ -75,12 +73,14 @@ describe('the build command', () => {
         it('should use the config in package.json and maven to launch the cljs compiler', function * () {
             yield cljsbuild();
 
-            expect(scriptEnv.readFiles()).toEqual({
+            const files = scriptEnv.readFiles();
+            expect(files).toEqual({
                 '.cljsbuild/classpath.hash': jasmine.any(String),
                 '.cljsbuild/classpath.value': 'foo-bar-classpath',
                 '.cljsbuild/build.clj': jasmine.any(String),
                 'package.json': '{"cljsbuild":{"main":"foo-main","dependencies":"foo-cljs-package"}}'
             });
+            expect(files['.cljsbuild/build.clj']).not.toMatch(/:advanced/);
             expect(mvnSpy).toHaveBeenCalledWith({
                 args: [
                     'dependency:build-classpath',
@@ -99,6 +99,12 @@ describe('the build command', () => {
 
         it('should build with :advanced when the -p flag is given', function * () {
             yield cljsbuild('-p');
+
+            expect(scriptEnv.readFiles()['.cljsbuild/build.clj']).toMatch(/:advanced/);
+        });
+
+        it('should build with :advanced when the --production flag is given', function * () {
+            yield cljsbuild('--production');
 
             expect(scriptEnv.readFiles()['.cljsbuild/build.clj']).toMatch(/:advanced/);
         });
