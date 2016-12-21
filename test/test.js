@@ -68,8 +68,24 @@ function * mockMavenAndClojars ({mavenCallback, clojarsCallback}) {
         }
 
         if (req.headers.host === 'clojars.org' && parsedUrl.pathname === '/search') {
-            // an array of items: {version: '1.0.1', group_name: '<groupId>', jar_name: '<artifactId>'}
-            const versions = clojarsCallback(parsedUrl.query.q);
+            // an array of items: {v: '1.0.1'}
+            const rawVersions = clojarsCallback(parsedUrl.query.q);
+            const versions = rawVersions.map((v) => {
+                // accept the maven mock format too (just an object with a
+                // single v key denoting the version)
+                if (Object.keys(v).join() === 'v') {
+                    const [groupId, artifactId] = parsedUrl.query.q.split(' ');
+
+                    return {
+                        version: v.v,
+                        group_name: groupId,
+                        jar_name: artifactId
+                    };
+                } else {
+                    // raw clojars format
+                    return v;
+                }
+            });
 
             if (!versions) {
                 res.writeHead(500, 'server error');
