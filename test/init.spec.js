@@ -1,5 +1,3 @@
-const fs = require('fs');
-
 const {scriptEnv, cljsbuild, mockMavenAndClojars} = require('./test');
 
 describe('the init command', () => {
