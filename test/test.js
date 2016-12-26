@@ -15,7 +15,8 @@ module.exports = {
     scriptEnv,
     cljsbuild,
     httpServer,
-    mockMavenAndClojars
+    mockMavenAndClojars,
+    resetScriptEnv
 };
 
 function httpServer ({port = 80} = {}) {
@@ -109,6 +110,15 @@ function * mockMavenAndClojars ({mavenCallback, clojarsCallback}) {
 
 function cljsbuild (...args) {
     return scriptEnv.exec(`/cljsbuild/cljsbuild.js ${args.join(' ')}`);
+}
+
+function resetScriptEnv () {
+    scriptEnv.clear();
+
+    // cljsbuilds shebang line is `#!/usr/bin/env node`, so we need env and node
+    // on the PATH to be able to run it
+    scriptEnv.provideCommand('node');
+    scriptEnv.provideCommand('env');
 }
 
 function runTests () {

@@ -28,7 +28,7 @@
     "jasmine": "2.5.2",
     "jasmine-co": "1.2.1",
     "jasmine-spec-reporter": "2.7.0",
-    "mock-script-environment": "0.1.0",
+    "mock-script-environment": "1.0.1",
     "supervisor": "^0.12.0"
   }
 }

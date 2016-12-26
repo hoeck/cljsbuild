@@ -1,4 +1,4 @@
-const {scriptEnv, cljsbuild, mockMavenAndClojars} = require('./test');
+const {scriptEnv, cljsbuild, mockMavenAndClojars, resetScriptEnv} = require('./test');
 
 describe('the init command', () => {
     let server;
@@ -6,7 +6,7 @@ describe('the init command', () => {
     let clojars;
 
     beforeEach(function * () {
-        scriptEnv.clear();
+        resetScriptEnv();
 
         maven = jasmine.createSpy();
         clojars = jasmine.createSpy();

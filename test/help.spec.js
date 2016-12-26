@@ -1,11 +1,9 @@
-const fs = require('fs');
-
-const {scriptEnv, cljsbuild} = require('./test');
+const {scriptEnv, cljsbuild, resetScriptEnv} = require('./test');
 
 describe('the basic options', () => {
 
     beforeEach(() => {
-        scriptEnv.clear();
+        resetScriptEnv();
     });
 
     describe('"--version"', () => {

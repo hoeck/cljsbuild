@@ -1,9 +1,9 @@
-const {scriptEnv, cljsbuild} = require('./test');
+const {scriptEnv, cljsbuild, resetScriptEnv} = require('./test');
 
 describe('the build command', () => {
 
     beforeEach(() => {
-        scriptEnv.clear();
+        resetScriptEnv();
     });
 
     describe('in an empty or misconfigured project', () => {
