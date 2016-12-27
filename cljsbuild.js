@@ -80,7 +80,7 @@ function jsObjectToClj (object) {
 
 function isRlwrapAvailable () {
     try {
-        childProcess.execSync('which rlwraps');
+        childProcess.execSync('rlwrap -v');
 
         return true;
     } catch (e) {
@@ -692,7 +692,7 @@ class ClojureScript {
         sh(`${rlwrap}java -cp ${classpath} clojure.main ${buildClj}`);
     }
 
-    build ({production}) {
+    build ({production} = {}) {
         this._createBuildClj({buildMethod: 'build', production});
         this._runBuildClj();
     }
