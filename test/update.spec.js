@@ -1,6 +1,6 @@
 const {scriptEnv, cljsbuild, mockMavenAndClojars, resetScriptEnv} = require('./test');
 
-describe('the init command', () => {
+describe('the update command', () => {
     let server;
     let maven;
     let clojars;
@@ -20,6 +20,7 @@ describe('the init command', () => {
         scriptEnv.writeFiles({
             'package.json': JSON.stringify({
                 cljsbuild: {
+                    main: 'org.bar',
                     dependencies: {
                         'com.foo/lib-a': '1.2.3',
                         'com.foo/lib-b': '4.5.6'
@@ -50,6 +51,7 @@ describe('the init command', () => {
         const packageJson = JSON.parse(scriptEnv.readFiles()['package.json']);
         expect(packageJson).toEqual({
             cljsbuild: {
+                main: 'org.bar',
                 dependencies: {
                     // will choose the first result from maven.org/clojars,
                     // regardless of actual version number
@@ -74,6 +76,7 @@ describe('the init command', () => {
         const packageJson = JSON.parse(scriptEnv.readFiles()['package.json']);
         expect(packageJson).toEqual({
             cljsbuild: {
+                main: 'org.bar',
                 dependencies: {
                     'com.foo/lib-a': '9.0.0',
                     'com.foo/lib-b': '9.0.0'
@@ -82,23 +85,34 @@ describe('the init command', () => {
         });
     });
 
-    it('should not modify package.json with "--dry-run"', function * () {
+    describe('with the "--dry-run" option', () => {
 
-        // using maven or clojars shouldn't matter
-        maven.and.returnValue([]);
-        clojars.and.returnValue([{v: '9.0.0'}]);
-
-        const res = yield cljsbuild('update', '--dry-run');
-
-        const packageJson = JSON.parse(scriptEnv.readFiles()['package.json']);
-        expect(packageJson).toEqual({
-            cljsbuild: {
-                dependencies: {
-                    'com.foo/lib-a': '1.2.3',
-                    'com.foo/lib-b': '4.5.6'
-                }
-            }
+        beforeEach(() => {
+            // using maven or clojars shouldn't matter
+            maven.and.returnValue([]);
+            clojars.and.returnValue([{v: '9.0.0'}]);
         });
-        expect(res.stdout).toMatch(/lib-a/);
+
+        it('should not modify package.json', function * () {
+            const res = yield cljsbuild('update', '--dry-run');
+
+            const packageJson = JSON.parse(scriptEnv.readFiles()['package.json']);
+            expect(packageJson).toEqual({
+                cljsbuild: {
+                    main: 'org.bar',
+                    dependencies: {
+                        'com.foo/lib-a': '1.2.3',
+                        'com.foo/lib-b': '4.5.6'
+                    }
+                }
+            });
+        });
+
+        it('should print the packages that have a newer version available', function * () {
+            const res = yield cljsbuild('update', '--dry-run');
+
+            expect(res.stdout).toMatch(/ *lib-a *1\.2\.3 *=> *9\.0\.0/);
+            expect(res.stdout).toMatch(/ *lib-b *4\.5\.6 *=> *9\.0\.0/);
+        });
     });
 });

@@ -410,9 +410,10 @@ class Config {
             })));
 
             if (!options.dryRun) {
-                this._updatePackageJson(['cljsbuild'], {
-                    dependencies: Object.assign({}, current, updated)
-                });
+                this._updatePackageJson(
+                    ['cljsbuild', 'dependencies'],
+                    Object.assign({}, current, updated)
+                );
                 log('done');
             }
         }).catch(logErrorAndExit);
