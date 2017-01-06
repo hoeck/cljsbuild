@@ -698,9 +698,9 @@ class ClojureScript {
         this._runBuildClj();
     }
 
-    watch () {
+    watch (options) {
         this._createBuildClj({buildMethod: 'watch'});
-        this._runBuildClj();
+        this._runBuildClj(options);
     }
 
     repl () {
@@ -752,6 +752,10 @@ function runCommand (args) {
             cider: args['--cider'],
             dryRun: args['--dry-run']
         });
+    }
+    else if (args.watch) {
+        log('watching ...');
+        cljs.watch();
     } else {
         info('building');
         cljs.build({
@@ -765,6 +769,7 @@ Build, install dependencies and manage REPLs for a Clojurescript project.
 
 usage:
     cljsbuild [options] [build-options]
+    cljsbuild [options] watch
     cljsbuild [options] init [dependency-options]
     cljsbuild [options] update [dependency-options]
     cljsbuild [options] install
