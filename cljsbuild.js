@@ -19,15 +19,17 @@ const simpleGet = require('simple-get');
 
 /* logging */
 
+let logVerbosity = 1;
+
 function log (...args) {
-    console.log(...args);
+    if (logVerbosity > 0) {
+        console.log(...args);
+    }
 }
 
-let logVerbosity = 0;
-
 function info (...args) {
-    if (logVerbosity) {
-        log(...args);
+    if (logVerbosity > 1) {
+        console.log(...args);
     }
 }
 
@@ -92,7 +94,7 @@ function readCljsBuildPackageJson () {
     try {
         return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json')));
     } catch (e) {
-        log('error while trying to load cljsbuilds package.json');
+        warn('error while trying to load cljsbuilds package.json');
         throw e;
     }
 }
@@ -284,7 +286,7 @@ class Config {
                     return {name, version};
                 }
 
-                log(`no version found for package ${JSON.stringify(name)}`);
+                warn(`no version found for package ${JSON.stringify(name)}`);
 
                 return undefined;
             });
@@ -356,9 +358,9 @@ class Config {
             if (options.dryRun) {
                 log('cljsbuild config data:', '\n'+JSON.stringify(packageJsonCljsbuild, null, 2));
             } else {
-                log('writing cljsbuild section to package.json');
+                info('writing cljsbuild section to package.json');
                 this._updatePackageJson(['cljsbuild'], packageJsonCljsbuild);
-                log('done');
+                info('done');
             }
         }).catch(logErrorAndExit);
     }
@@ -598,7 +600,9 @@ class ClojureScript {
                 ``,
                 `(defn start-repl []`,
                 `  (cemerick.piggieback/cljs-repl`,
-                `    (weasel.repl.websocket/repl-env :ip "0.0.0.0" :port 9001)))`
+                `    (weasel.repl.websocket/repl-env :ip "0.0.0.0" :port 9001)))`,
+                `  :output-dir ${JSON.stringify(path.dirname(this._config.getConfig('target')))}`,
+                ``
             );
         }
 
@@ -616,7 +620,7 @@ class ClojureScript {
 
         // cljs.build.api
         if (params.buildMethod) {
-            assert(['build', 'watch'].indexOf(params.buildMethod) === 0);
+            assert(['build', 'watch'].indexOf(params.buildMethod) !== -1);
 
             const buildOpts = {
                 main: `'${this._config.getConfig('main')}`,
@@ -685,9 +689,14 @@ class ClojureScript {
 
     _runBuildClj (options) {
         const rlwrap = (options || {}).useRlwrap && isRlwrapAvailable() ? 'rlwrap ' : '';
-        const classpath = [this._maven.getClasspath(),
-                           this._getUserCljPath(),
-                           this._config.getConfig('src')].join(':');
+        const classpath = [
+            this._maven.getClasspath(),
+
+            // user clj is at tempdir/user/user.clj, so tempdir must be on the cp
+            path.join(this._config.getConfig('tempdir')),
+
+            this._config.getConfig('src')
+        ].join(':');
         const buildClj = this._getBuildCljPath();
 
         sh(`${rlwrap}java -cp ${classpath} clojure.main ${buildClj}`);
@@ -710,8 +719,8 @@ class ClojureScript {
     }
 
     nrepl () {
-        this.build();
         this._createBuildClj({useNrepl: true});
+        this._createUserClj({usePiggieback: true});
 
         // cleanup tempfiles
         process.on('SIGINT', () => process.exit());
@@ -730,23 +739,23 @@ function runCommand (args) {
     const cljs = new ClojureScript({maven, config});
 
     if (args.install) {
-        info('installing cljs depedencies via maven');
+        log('installing cljs depedencies via maven ...');
         maven.installDependencies();
     } else if (args.repl) {
-        info('starting cljs repl');
+        log('starting cljs repl ...');
         cljs.repl();
     } else if (args.nrepl) {
-        info('starting nrepl server');
+        log('starting nrepl server ...');
         cljs.nrepl();
     } else if (args.init) {
-        info('initializing cljs dependencies in package.json');
+        log('initializing cljs dependencies in package.json ...');
         config.initConfig({
             releasesOnly: args['--releases-only'],
             cider: args['--cider'],
             dryRun: args['--dry-run']
         });
     } else if (args.update) {
-        info('updating cljs dependencies configured in package.json');
+        log('updating cljs dependencies configured in package.json ...');
         config.updateDependencies({
             releasesOnly: args['--releases-only'],
             cider: args['--cider'],
@@ -757,7 +766,7 @@ function runCommand (args) {
         log('watching ...');
         cljs.watch();
     } else {
-        info('building');
+        log('building ...');
         cljs.build({
             production: args['--production']
         });
@@ -808,7 +817,7 @@ function main () {
     }
 
     if (args['--verbose']) {
-        logVerbosity = 1;
+        logVerbosity += 1;
     }
 
     runCommand(args);
