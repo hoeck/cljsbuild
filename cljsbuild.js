@@ -582,7 +582,7 @@ class ClojureScript {
     }
 
     _getNreplPortPath () {
-        return '.repl-port';
+        return '.nrepl-port';
     }
 
     // user.clj file autoloaded by clojure, defines start-repl to initiate a
