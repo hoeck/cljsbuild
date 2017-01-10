@@ -572,7 +572,7 @@ class ClojureScript {
     }
 
     _getUserCljPath () {
-        return path.join(this._config.getConfig('tempdir'), 'user', 'user.clj');
+        return path.join(this._config.getConfig('tempdir'), 'user.clj');
     }
 
     _getBuildCljPath () {
@@ -590,7 +590,7 @@ class ClojureScript {
     // user.clj file autoloaded by clojure, defines start-repl to initiate a
     // piggiback+weasel cljs repl.
     // Takes the same params as _createBuildClj
-    _createUserClj (params) {
+    _createUserClj (params = {}) {
         const buffer = [];
 
         if (params.usePiggieback) {
@@ -608,9 +608,15 @@ class ClojureScript {
 
         const userCljPath = this._getUserCljPath();
 
-        info(`writing ${JSON.stringify(userCljPath)}`);
-        mkdirp.sync(path.dirname(userCljPath));
-        fs.writeFileSync(userCljPath, buffer.join('\n'));
+        if (buffer.length) {
+            info(`writing ${JSON.stringify(userCljPath)}`);
+            mkdirp.sync(path.dirname(userCljPath));
+            fs.writeFileSync(userCljPath, buffer.join('\n'));
+        } else if (fs.existsSync(path.dirname(userCljPath))) {
+            // clean up an old user.clj
+            info(`removing ${JSON.stringify(userCljPath)}`);
+            removeFile(userCljPath);
+        }
     }
 
     // create a build.clj file that invokes the clojurescript compiler and/or
@@ -633,10 +639,13 @@ class ClojureScript {
             buffer.push(
                 `(require 'cljs.build.api)`,
                 ``,
-                `(cljs.build.api/${params.buildMethod}`,
-                `  ${JSON.stringify(this._config.getConfig('src'))}`,
-                `  ${jsObjectToClj(buildOpts)}`,
-                `)`
+                `(defn run-build []`,
+                `  (cljs.build.api/${params.buildMethod}`,
+                `    ${JSON.stringify(this._config.getConfig('src'))}`,
+                `    ${jsObjectToClj(buildOpts)}`,
+                `  ))`,
+                ``,
+                `(if ${Boolean(params.buildAsync)} (.start (Thread. run-build)) (run-build))`
             );
         }
 
@@ -704,22 +713,25 @@ class ClojureScript {
 
     build ({production} = {}) {
         this._createBuildClj({buildMethod: 'build', production});
+        this._createUserClj();
         this._runBuildClj();
     }
 
     watch (options) {
         this._createBuildClj({buildMethod: 'watch'});
+        this._createUserClj();
         this._runBuildClj(options);
     }
 
     repl () {
         this.build();
         this._createBuildClj({useRepl: true});
+        this._createUserClj();
         this._runBuildClj({useRlwrap: true});
     }
 
     nrepl () {
-        this._createBuildClj({useNrepl: true});
+        this._createBuildClj({useNrepl: true, buildMethod: "watch", buildAsync: true});
         this._createUserClj({usePiggieback: true});
 
         // cleanup tempfiles
