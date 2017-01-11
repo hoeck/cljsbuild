@@ -55,7 +55,7 @@ function sh (command) {
 
 function removeFile (fileName) {
     try {
-        fs.unlink(fileName);
+        fs.unlinkSync(fileName);
     } catch (e) {
         info('could not remove file', fileName, 'error:', e.stack);
     };
@@ -572,7 +572,7 @@ class ClojureScript {
     }
 
     _getUserCljPath () {
-        return path.join(this._config.getConfig('tempdir'), 'user.clj');
+        return path.join(this._config.getConfig('tempdir'), 'user', 'user.clj');
     }
 
     _getBuildCljPath () {
@@ -702,7 +702,7 @@ class ClojureScript {
             this._maven.getClasspath(),
 
             // user clj is at tempdir/user/user.clj, so tempdir must be on the cp
-            path.join(this._config.getConfig('tempdir')),
+            path.dirname(this._getUserCljPath()),
 
             this._config.getConfig('src')
         ].join(':');

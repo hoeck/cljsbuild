@@ -14,7 +14,7 @@ describe('the repl and nrepl commands', () => {
     function getJavaArgs(classpath) {
         return [
             '-cp',
-            `${classpath}:.cljsbuild/user/user.clj:src`,
+            `${classpath}:.cljsbuild/user:src`,
             'clojure.main',
             '.cljsbuild/build.clj'
         ];
@@ -118,16 +118,22 @@ describe('the repl and nrepl commands', () => {
 
     describe('nrepl', () => {
         it('should spin up a java process running the repl server', function * () {
-
             yield cljsbuild('nrepl');
 
             expect(mvnSpy).toHaveBeenCalledWith({args: mvnArgs});
 
-            // java is called two times: to build cljs and to start the nrepl server
             expect(javaSpy.calls.allArgs()).toEqual([
-                [{args: getJavaArgs('foo-bar-classpath')}],
                 [{args: getJavaArgs('foo-bar-classpath')}]
             ]);
+        });
+
+        it('should create a user.clj file with the "start-repl" function', function * () {
+            yield cljsbuild('nrepl');
+
+            const files = scriptEnv.readFiles();
+
+            expect(files['.cljsbuild/user/user.clj']).toBeDefined();
+            expect(files['.cljsbuild/user/user.clj']).toMatch(/start-repl/);
         });
     });
 });

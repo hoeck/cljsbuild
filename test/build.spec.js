@@ -90,7 +90,7 @@ describe('the build command', () => {
             });
             expect(javaSpy).toHaveBeenCalledWith({
                 args: [
-                    '-cp', 'foo-bar-classpath:.cljsbuild/user/user.clj:src',
+                    '-cp', 'foo-bar-classpath:.cljsbuild/user:src',
                     'clojure.main',
                     '.cljsbuild/build.clj'
                 ]
