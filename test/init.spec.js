@@ -107,6 +107,22 @@ describe('the init command', () => {
         );
     });
 
+    it('should include dependencies neccesary for figwheel with "--figwheel"', function * () {
+        scriptEnv.writeFiles({'package.json': '{}'});
+
+        maven.and.returnValue([{v: '1.0.1'}]);
+
+        yield cljsbuild('init', '--figwheel');
+
+        const packageJson = JSON.parse(scriptEnv.readFiles()['package.json']);
+        expect(packageJson.cljsbuild.dependencies).toEqual(
+            jasmine.objectContaining({
+                'org.clojure/clojure': '1.0.1',
+                'figwheel-sidecar': '1.0.1'
+            })
+        );
+    });
+
     it('should only print what would have been done with "--dry-run"', function * () {
         scriptEnv.writeFiles({'package.json': '{}'});
 

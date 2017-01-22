@@ -862,13 +862,13 @@ function runCommand (args) {
         config.initConfig({
             releasesOnly: args['--releases-only'],
             cider: args['--cider'],
+            figwheel: args['--figwheel'],
             dryRun: args['--dry-run']
         });
     } else if (args.update) {
         log('updating cljs dependencies configured in package.json ...');
         config.updateDependencies({
             releasesOnly: args['--releases-only'],
-            cider: args['--cider'],
             dryRun: args['--dry-run']
         });
     }

@@ -53,7 +53,6 @@ describe('the repl and nrepl commands', () => {
 
             // java is called two times: to build cljs and to start the repl
             expect(javaSpy.calls.allArgs()).toEqual([
-                [{args: getJavaArgs('foo-bar-classpath')}],
                 [{args: getJavaArgs('foo-bar-classpath')}]
             ]);
         });
@@ -69,6 +68,10 @@ describe('the repl and nrepl commands', () => {
                 // second call for the repl
                 [{args: ['java'].concat(getJavaArgs('foo-bar-classpath'))}]
             ]);
+
+            const buildCljs = scriptEnv.readFiles()['.cljsbuild/build.clj'];
+
+            expect(buildCljs).toMatch(/cljs.repl\/repl/);
         });
 
         it('should use a cached classpath file if depdendencies are unchanged', function * () {
@@ -114,26 +117,49 @@ describe('the repl and nrepl commands', () => {
                 '.cljsbuild/classpath.value': 'foo-bar-updated-classpath'
             }));
         });
+
+        it('should start a figwheel cljs-repl with "--figwheel"', function * () {
+            yield cljsbuild('repl', '--figwheel');
+
+            expect(mvnSpy).toHaveBeenCalled();
+
+            const buildCljs = scriptEnv.readFiles()['.cljsbuild/build.clj'];
+
+            expect(buildCljs).toMatch(/\(fig\/cljs-repl\)/);
+            expect(buildCljs).toMatch(/\(start-repl\)/);
+            expect(buildCljs).not.toMatch(/cljs.repl\/repl/);
+        });
     });
 
     describe('nrepl', () => {
-        it('should spin up a java process running the repl server', function * () {
+        it('should spin up a java process running the nrepl server', function * () {
             yield cljsbuild('nrepl');
 
             expect(mvnSpy).toHaveBeenCalledWith({args: mvnArgs});
-
             expect(javaSpy.calls.allArgs()).toEqual([
                 [{args: getJavaArgs('foo-bar-classpath')}]
             ]);
+
+            const buildCljs = scriptEnv.readFiles()['.cljsbuild/build.clj'];
+
+            expect(buildCljs).toMatch(/start-server/);
         });
 
         it('should create a user.clj file with the "start-repl" function', function * () {
             yield cljsbuild('nrepl');
 
-            const files = scriptEnv.readFiles();
+            const userClj = scriptEnv.readFiles()['.cljsbuild/user/user.clj'];
 
-            expect(files['.cljsbuild/user/user.clj']).toBeDefined();
-            expect(files['.cljsbuild/user/user.clj']).toMatch(/start-repl/);
+            expect(userClj).toMatch(/defn start-repl/);
+        });
+
+        it('should create a user.clj file with the "start-repl" function and figwheel', function * () {
+            yield cljsbuild('nrepl', '--figwheel');
+
+            const userClj = scriptEnv.readFiles()['.cljsbuild/user/user.clj'];
+
+            expect(userClj).toMatch(/defn start-repl/);
+            expect(userClj).toMatch(/fig\/cljs-repl/);
         });
     });
 });
