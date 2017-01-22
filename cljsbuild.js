@@ -10,6 +10,7 @@ const path = require('path');
 const process = require('process');
 const querystring = require('querystring');
 const url = require('url');
+const util = require('util');
 
 const asTable = require('as-table');
 const lodash = require('lodash');
@@ -74,10 +75,41 @@ function readFile (fileName) {
     }
 }
 
-function jsObjectToClj (object) {
-    return '{' + Object.keys(object).map((k) => {
-        return `:${k} ${typeof object[k] === 'object' ? jsObjectToClj(object[k]) : object[k]}`;
-    }).join(',') + '}';
+// convert a js object to a string evaling to the same in cljs
+// flat=true to omit toplevel braces for argument application in templates
+function jsToClj (object, flat = false) {
+    if (util.isString(object)) {
+        if (object[0] === ':') {
+            return object; // a keyword
+        }
+
+        return JSON.stringify(object);
+    }
+
+    if (util.isNumber(object)) {
+        return JSON.stringify(object);
+    }
+
+    if (util.isBoolean(object)) {
+        return object ? "true" : "false";
+    }
+
+    if (util.isArray(object)) {
+        const elements = object.map(jsToClj).join(' ');
+        if (flat) {
+            return elements;
+        }
+        return `[${elements}]`;
+    }
+
+    const pairs = Object.keys(object).map((k) => {
+        return `${jsToClj(k)} ${jsToClj(object[k])}`;
+    }).join(',\n');
+
+    if (flat) {
+        return pairs;
+    }
+    return `{${pairs}}`;
 }
 
 function isRlwrapAvailable () {
@@ -209,6 +241,9 @@ class Config {
     }
 
     _loadConfig () {
+        // TODO: allow overwriting of keys from package.json via a cli switch,
+        //       e.g. to turn on the :verbose cljs compiler flag programmatically
+
         if (this._cljsbuild) {
             return;
         }
@@ -317,6 +352,7 @@ class Config {
      * options:
      *  - releasesOnly .. do not use alpha, beta, rc versions
      *  - cider .. add cider/nrepl && refactor-nrepl
+     *  - figwheel .. add figwheel-sidecar
      *  - dryRun .. only show what would have be written into package.json
      */
     initConfig (options) {
@@ -346,6 +382,12 @@ class Config {
             defaultPackages.push(
                 'cider/cider-nrepl',
                 'refactor-nrepl'
+            );
+        }
+
+        if (options.figwheel) {
+            defaultPackages.push(
+                'figwheel-sidecar'
             );
         }
 
@@ -587,23 +629,64 @@ class ClojureScript {
         return '.nrepl-port';
     }
 
-    // user.clj file autoloaded by clojure, defines start-repl to initiate a
-    // piggiback+weasel cljs repl.
-    // Takes the same params as _createBuildClj
+    _getCompilerOptions () {
+        // see https://github.com/clojure/clojurescript/wiki/Compiler-Options
+        return {
+            // entry point namespace
+            ':main': this._config.getConfig('main'),
+
+            // name of the generated js file
+            ':output-to': this._config.getConfig('target'),
+
+            // directory for compiled files during development
+            ':output-dir': path.dirname(this._config.getConfig('target')),
+            ':asset-path': this._config.getConfig('assetPath')
+        };
+    }
+
+    _getFigwheelSetup ({startImmediately} = {}) {
+        const buildOpts = Object.assign(this._getCompilerOptions(), {
+            ':verbose': true // TODO: make that a package.json arg
+        });
+
+        return [
+            `(require '[figwheel-sidecar.repl-api :as fig])`,
+            ``,
+            `(fig/start-figwheel!`,
+            ` {:figwheel-options {} ;; <-- figwheel server config goes here `,
+            `  :build-ids ["dev"]   ;; <-- a vector of build ids to start autobuilding`,
+            `  :all-builds          ;; <-- supply your build configs here`,
+            `  [{:id "dev"`,
+            `    :figwheel true`,
+            `    :source-paths [${jsToClj(this._config.getConfig('src'))}]`,
+            `    :compiler ${jsToClj(buildOpts)}}]})`,
+            ``,
+            `(defn start-repl [] (fig/cljs-repl))`,
+            ``,
+            startImmediately ? `(start-repl)` : ``
+        ];
+    }
+
+    // user.clj file autoloaded by clojure
     _createUserClj (params = {}) {
         const buffer = [];
+        const buildOpts = this._getCompilerOptions();
 
         if (params.usePiggieback) {
+            // defines start-repl to initiate a piggiback+weasel (websocket) cljs repl
             buffer.push(
                 `(require 'cemerick.piggieback)`,
                 `(require 'weasel.repl.websocket)`,
                 ``,
                 `(defn start-repl []`,
                 `  (cemerick.piggieback/cljs-repl`,
-                `    (weasel.repl.websocket/repl-env :ip "0.0.0.0" :port 9001)))`,
-                `  :output-dir ${JSON.stringify(path.dirname(this._config.getConfig('target')))}`,
-                ``
+                `    (weasel.repl.websocket/repl-env :ip "0.0.0.0" :port 9001)`,
+                `    ${jsToClj(buildOpts, true)}))`
             );
+        }
+
+        if (params.useFigwheel) {
+            buffer.push(...this._getFigwheelSetup({startImmediately: false}));
         }
 
         const userCljPath = this._getUserCljPath();
@@ -628,21 +711,17 @@ class ClojureScript {
         if (params.buildMethod) {
             assert(['build', 'watch'].indexOf(params.buildMethod) !== -1);
 
-            const buildOpts = {
-                main: `'${this._config.getConfig('main')}`,
-                'output-to': `"${this._config.getConfig('target')}"`,
-                'output-dir': `"${path.dirname(this._config.getConfig('target'))}"`,
-                'asset-path': `"${this._config.getConfig('assetPath')}"`,
-                optimizations: params.production ? ':advanced' : ':none'
-            };
+            const buildOpts = Object.assign(this._getCompilerOptions(), {
+                ':optimizations': params.production ? ':advanced' : ':none'
+            });
 
             buffer.push(
                 `(require 'cljs.build.api)`,
                 ``,
                 `(defn run-build []`,
                 `  (cljs.build.api/${params.buildMethod}`,
-                `    ${JSON.stringify(this._config.getConfig('src'))}`,
-                `    ${jsObjectToClj(buildOpts)}`,
+                `    ${jsToClj(this._config.getConfig('src'))}`,
+                `    ${jsToClj(buildOpts)}`,
                 `  ))`,
                 ``,
                 `(if ${Boolean(params.buildAsync)} (.start (Thread. run-build)) (run-build))`
@@ -651,16 +730,24 @@ class ClojureScript {
 
         // console cljs.repl + watch
         if (params.useRepl) {
+            const buildOpts = Object.assign(this._getCompilerOptions(), {
+                ':watch': this._config.getConfig('src')
+            });
+
             buffer.push(
                 `(require 'cljs.repl)`,
                 `(require 'cljs.build.api)`,
                 `(require 'cljs.repl.browser)`,
                 ``,
                 `(cljs.repl/repl (cljs.repl.browser/repl-env)`,
-                `  :watch ${JSON.stringify(this._config.getConfig('src'))}`,
-                `  :output-dir ${JSON.stringify(path.dirname(this._config.getConfig('target')))}`,
+                `  ${jsToClj(buildOpts, true)}`,
                 `)`
             );
+        }
+
+        // drop into a figwheel cljs repl
+        if (params.useFigwheel) {
+            buffer.push(...this._getFigwheelSetup({startImmediately: true}));
         }
 
         // nrepl + cemerik/piggieback + middleware + .repl-port file + fake
@@ -713,7 +800,7 @@ class ClojureScript {
 
     build ({production} = {}) {
         this._createBuildClj({buildMethod: 'build', production});
-        this._createUserClj();
+        this._createUserClj(); // empty user.clj to overwrite any existing prev. user.clj
         this._runBuildClj();
     }
 
@@ -723,16 +810,27 @@ class ClojureScript {
         this._runBuildClj(options);
     }
 
-    repl () {
-        this.build();
-        this._createBuildClj({useRepl: true});
-        this._createUserClj();
-        this._runBuildClj({useRlwrap: true});
+    repl (options) {
+        if (options.figwheel) {
+            this._createBuildClj({useFigwheel: true});
+            this._createUserClj({}); // empty user clj
+            this._runBuildClj({useRlwrap: true});
+        } else {
+            this._createBuildClj({useRepl: true, buildMethod: "build"});
+            this._createUserClj(); // empty user clj
+            this._runBuildClj({useRlwrap: true});
+        }
     }
 
-    nrepl () {
-        this._createBuildClj({useNrepl: true, buildMethod: "watch", buildAsync: true});
-        this._createUserClj({usePiggieback: true});
+    nrepl (options) {
+        if (options.figwheel) {
+            // figwheel build-watches and also provides functions to start the cljs repl
+            this._createBuildClj({useNrepl: true});
+            this._createUserClj({useFigwheel: true});
+        } else {
+            this._createBuildClj({useNrepl: true, buildMethod: "watch", buildAsync: true});
+            this._createUserClj({usePiggieback: true});
+        }
 
         // cleanup tempfiles
         process.on('SIGINT', () => process.exit());
@@ -755,10 +853,10 @@ function runCommand (args) {
         maven.installDependencies();
     } else if (args.repl) {
         log('starting cljs repl ...');
-        cljs.repl();
+        cljs.repl({figwheel: args['--figwheel']});
     } else if (args.nrepl) {
         log('starting nrepl server ...');
-        cljs.nrepl();
+        cljs.nrepl({figwheel: args['--figwheel']});
     } else if (args.init) {
         log('initializing cljs dependencies in package.json ...');
         config.initConfig({
@@ -794,8 +892,8 @@ usage:
     cljsbuild [options] init [dependency-options]
     cljsbuild [options] update [dependency-options]
     cljsbuild [options] install
-    cljsbuild [options] repl
-    cljsbuild [options] nrepl
+    cljsbuild [options] repl [repl-options]
+    cljsbuild [options] nrepl [repl-options]
 
 options:
     -h, --help             show help
@@ -807,8 +905,12 @@ build-options:
 
 dependency-options:
     -c, --cider            add emacs cider dependencies
+    -f, --figwheel         add figwheel-sidecar to the dependencies
     -r, --releases-only    do not use alpha, beta or RC releases
     -d, --dry-run          only show what would be written to package.json
+
+repl-options:
+    -f, --figwheel         use figwheel
 `;
 
 function main () {
