@@ -210,8 +210,8 @@ class Config {
         return {
             fakeProjectFile: 'project.clj',
             tempdir: '.cljsbuild',
-            target: 'out/main.js',
-            assetPath: '.',
+            target: 'build/js/main.js',
+            assetPath: 'js',
             src: 'src',
             main: undefined,
             replPort: 9000,
@@ -393,7 +393,7 @@ class Config {
 
         this._findPackageVersions(defaultPackages, options.releasesOnly).then((dependencies) => {
             const packageJsonCljsbuild = {
-                main: '<add-your-namespace-here>/core',
+                main: '<insert-your-namespace-here (e.g. app.core)>',
                 dependencies
             };
 
@@ -559,6 +559,7 @@ class Maven {
         const pomXmlPath = this._getPomXmlPath();
 
         info(`writing ${JSON.stringify(pomXmlPath)}`);
+        mkdirp.sync(path.dirname(pomXmlPath));
         fs.writeFileSync(pomXmlPath, buffer.join('\n'));
     }
 

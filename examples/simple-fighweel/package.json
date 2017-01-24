@@ -1,0 +1,29 @@
+{
+  "name": "cljsbuild-example",
+  "version": "1.0.0",
+  "description": "A cljsbuild application template",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "repl": "concurrently --kill-others --raw 'http-server -c-1 --silent -p 8080 build 0<&-' 'cpx html/index.html build --watch 0<&-' 'cljsbuild repl --figwheel'"
+  },
+  "author": "",
+  "license": "MIT",
+  "cljsbuild": {
+    "main": "app.core",
+    "dependencies": {
+      "org.clojure/clojure": "1.9.0-alpha14",
+      "org.clojure/clojurescript": "1.9.293",
+      "org.clojure/tools.nrepl": "0.2.12",
+      "com.cemerick/piggieback": "0.2.1",
+      "weasel": "0.7.0",
+      "figwheel-sidecar": "0.5.9-SNAPSHOT"
+    }
+  },
+  "devDependencies": {
+    "cljsbuild": "0.0.7",
+    "concurrently": "^3.1.0",
+    "cpx": "^1.5.0",
+    "http-server": "^0.9.0"
+  }
+}
