@@ -21,7 +21,7 @@
     }
   },
   "devDependencies": {
-    "cljsbuild": "0.0.7",
+    "cljsbuild": "^0.1.0",
     "concurrently": "^3.1.0",
     "cpx": "^1.5.0",
     "http-server": "^0.9.0"
