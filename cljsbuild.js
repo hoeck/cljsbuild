@@ -94,6 +94,14 @@ function jsToClj (object, flat = false) {
         return object ? "true" : "false";
     }
 
+    if (util.isUndefined(object)) {
+        return '';
+    }
+
+    if (util.isNull(object)) {
+        return 'nil';
+    }
+
     if (util.isArray(object)) {
         const elements = object.map(jsToClj).join(' ');
         if (flat) {
@@ -214,9 +222,13 @@ class Config {
             assetPath: 'js',
             src: 'src',
             main: undefined,
+            onJsload: undefined,
+            foreignLibs: [],
             replPort: 9000,
             replHost: 'localhost',
-            dependencies: undefined
+            dependencies: undefined,
+            languageIn: undefined,
+            verbose: false // TODO: put all compiler options into dedicated map
         };
     }
 
@@ -298,13 +310,11 @@ class Config {
     getConfig (key) {
         this._loadConfig();
 
-        const value = this._cljsbuild[key];
-
-        if (value === undefined) {
-            logErrorAndExit(`undefined package.json value: cljsbuild.${key}`);
+        if (!this._cljsbuild.hasOwnProperty(key)) {
+            logErrorAndExit(`undefined package.json value: cljsbuild.${key} at ${(new Error()).stack}`);
         }
 
-        return value;
+        return this._cljsbuild[key];
     }
 
     _fetchLatestVersion (name, releasesOnly) {
@@ -641,24 +651,43 @@ class ClojureScript {
 
             // directory for compiled files during development
             ':output-dir': path.dirname(this._config.getConfig('target')),
-            ':asset-path': this._config.getConfig('assetPath')
+
+            // where to load scripts from during development (relative to where the app is loaded from)
+            ':asset-path': this._config.getConfig('assetPath'),
+
+            // dependencies to external libraries
+            ':foreign-libs': this._config.getConfig('foreignLibs').map((entry) => {
+                return Object.assign(
+                    {},
+                    ...Object.keys(entry)
+                        .map((k) => {
+                            const dashedKey = ':' + k.replace(/([a-zA-Z])(?=[A-Z])/g, '$1-').toLowerCase();
+                            return {[dashedKey]: entry[k]};
+                        })
+                );
+            }),
+
+            // language-in (e.g. from foreign libs)
+            ':language-in': this._config.getConfig('languageIn'),
+
+            // more output when compiling
+            ':verbose': this._config.getConfig('verbose')
         };
     }
 
     _getFigwheelSetup ({startImmediately} = {}) {
-        const buildOpts = Object.assign(this._getCompilerOptions(), {
-            ':verbose': true // TODO: make that a package.json arg
-        });
+        const buildOpts = this._getCompilerOptions();
+        const onJsLoad = this._config.getConfig('onJsLoad');
+        const figwheelOpts = {':on-jsload': onJsLoad} || true;
 
         return [
             `(require '[figwheel-sidecar.repl-api :as fig])`,
             ``,
             `(fig/start-figwheel!`,
-            ` {:figwheel-options {} ;; <-- figwheel server config goes here `,
-            `  :build-ids ["dev"]   ;; <-- a vector of build ids to start autobuilding`,
+            ` {:build-ids ["dev"]   ;; <-- a vector of build ids to start autobuilding`,
             `  :all-builds          ;; <-- supply your build configs here`,
             `  [{:id "dev"`,
-            `    :figwheel true`,
+            `    :figwheel ${jsToClj(figwheelOpts)}`,
             `    :source-paths [${jsToClj(this._config.getConfig('src'))}]`,
             `    :compiler ${jsToClj(buildOpts)}}]})`,
             ``,
