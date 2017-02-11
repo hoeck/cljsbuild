@@ -83,6 +83,10 @@ function jsToClj (object, flat = false) {
             return object; // a keyword
         }
 
+        if (object[0] === "'") {
+            return object.slice(1); // a symbol
+        }
+
         return JSON.stringify(object);
     }
 
@@ -216,19 +220,23 @@ class Config {
 
     _getDefaults () {
         return {
+            // cljsbuild options
             fakeProjectFile: 'project.clj',
             tempdir: '.cljsbuild',
+            dependencies: undefined,
+
+            // required build (compiler) options
             target: 'build/js/main.js',
             assetPath: 'js',
             src: 'src',
             main: undefined,
-            onJsload: undefined,
-            foreignLibs: [],
-            replPort: 9000,
-            replHost: 'localhost',
-            dependencies: undefined,
-            languageIn: undefined,
-            verbose: false // TODO: put all compiler options into dedicated map
+
+            // figwheel
+            onJsLoad: undefined,
+
+            // additional cljs compiler options
+            // https://github.com/clojure/clojurescript/wiki/Compileer-Options
+            compilerOptions: {}
         };
     }
 
@@ -642,7 +650,8 @@ class ClojureScript {
 
     _getCompilerOptions () {
         // see https://github.com/clojure/clojurescript/wiki/Compiler-Options
-        return {
+
+        const cljsbuildOptions = {
             // entry point namespace
             ':main': this._config.getConfig('main'),
 
@@ -653,26 +662,17 @@ class ClojureScript {
             ':output-dir': path.dirname(this._config.getConfig('target')),
 
             // where to load scripts from during development (relative to where the app is loaded from)
-            ':asset-path': this._config.getConfig('assetPath'),
-
-            // dependencies to external libraries
-            ':foreign-libs': this._config.getConfig('foreignLibs').map((entry) => {
-                return Object.assign(
-                    {},
-                    ...Object.keys(entry)
-                        .map((k) => {
-                            const dashedKey = ':' + k.replace(/([a-zA-Z])(?=[A-Z])/g, '$1-').toLowerCase();
-                            return {[dashedKey]: entry[k]};
-                        })
-                );
-            }),
-
-            // language-in (e.g. from foreign libs)
-            ':language-in': this._config.getConfig('languageIn'),
-
-            // more output when compiling
-            ':verbose': this._config.getConfig('verbose')
+            ':asset-path': this._config.getConfig('assetPath')
         };
+
+        const additionalCompilerOptions = this._config.getConfig('compilerOptions');
+
+        Object
+            .keys(additionalCompilerOptions)
+            .filter(k => cljsbuildOptions[k])
+            .forEach(k => log.warn(`compilerOptions: overwriting computed option ${k}`));
+
+        return Object.assign(cljsbuildOptions, additionalCompilerOptions);
     }
 
     _getFigwheelSetup ({startImmediately} = {}) {
